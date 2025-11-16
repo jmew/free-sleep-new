@@ -23,6 +23,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterMoment } from '@mui/x-date-pickers/AdapterMoment';
 import LogsPage from './pages/DataPage/LogsPage/LogsPage.tsx';
 import StatusPage from './pages/StatusPage/StatusPage.tsx';
+import BaseControlPage from './pages/BaseControlPage/BaseControlPage.tsx';
 
 const darkTheme = createTheme({
   palette: {
@@ -77,6 +78,7 @@ const App = () => {
                   <Route path="left" element={ <ControlTempPage/> }/>
                   <Route path="right" element={ <ControlTempPage/> }/>
                   <Route path="status" element={ <StatusPage /> } />
+                  <Route path="base-control" element={ <BaseControlPage /> } />
 
                   <Route path="data" element={ <DataPage /> }>
                     <Route path="sleep" element={ <SleepPage/> }/>

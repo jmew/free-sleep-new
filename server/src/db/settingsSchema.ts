@@ -19,9 +19,15 @@ const AlarmTapConfig = z.object({
   inactiveAlarmBehavior: z.enum(['power', 'none'])
 });
 
+const BaseTapConfig = z.object({
+  type: z.literal('base'),
+  behavior: z.enum(['cycle', 'none']),
+});
+
 export const TapConfig = z.discriminatedUnion('type', [
   TemperatureTapConfig,
   AlarmTapConfig,
+  BaseTapConfig,
 ]);
 
 export const GestureSchema = z.enum(['doubleTap', 'tripleTap', 'quadTap']);

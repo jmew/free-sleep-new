@@ -9,12 +9,20 @@ import { Gesture, GestureSchema } from '../db/settingsSchema.js';
 import { updateDeviceStatus } from '../routes/deviceStatus/updateDeviceStatus.js';
 import { DeepPartial } from 'ts-essentials';
 import serverStatus from '../serverStatus.js';
+import { BASE_PRESETS } from './basePresets.js';
+import { trimixBase } from './trimixBaseControl.js';
+import memoryDB from '../db/memoryDB.js';
+import fs from 'fs';
+import cbor from 'cbor';
 
-
+const DEFAULT_SNOOZE_MINUTES = 10;
+const MIN_SNOOZE_MINUTES = 1;
+const MAX_SNOOZE_MINUTES = 10;
 
 export class FrankenMonitor {
   private isRunning: boolean;
   private deviceStatus?: DeviceStatus;
+  private currentBasePreset: keyof typeof BASE_PRESETS = 'relax';
 
   constructor() {
     this.isRunning = false;
@@ -41,6 +49,65 @@ export class FrankenMonitor {
     this.isRunning = false;
   }
 
+  private async snoozeAlarm(side: 'left' | 'right', minutes: number) {
+    logger.info(`Snoozing alarm for ${side} for ${minutes} minutes.`);
+    try {
+      // Read existing alarm settings using CBOR decoding
+      const alarmBytes = fs.readFileSync('/persistent/alarm.cbr');
+      const alarmData = cbor.decode(alarmBytes);
+      logger.debug(
+        `Decoded alarm data: ${JSON.stringify(alarmData)}`,
+        'alarm data',
+      );
+
+      // Access the side data
+      const sideData = alarmData[side];
+      if (!sideData || typeof sideData !== 'object') {
+        throw new Error(`Invalid alarm data for ${side} side`);
+      }
+
+      // Validate snooze minutes
+      if (
+        minutes < MIN_SNOOZE_MINUTES ||
+        minutes > MAX_SNOOZE_MINUTES
+      ) {
+        // Using a default of 10 if the value is out of range, but logging a warning.
+        logger.warn(`Snooze minutes ${minutes} out of range. Defaulting to 10.`);
+        minutes = 10;
+      }
+
+      // Calculate snooze time
+      const snoozeTime =
+        Math.floor(Date.now() / 1000) + minutes * 60;
+
+      // Create alarm payload using existing settings
+      const alarmPayload = {
+        pl: sideData.pl,
+        du: sideData.du,
+        tt: snoozeTime,
+        pi: sideData.pi,
+      };
+
+      const cborPayload = cbor.encode(alarmPayload);
+      const hexPayload = cborPayload.toString('hex');
+      const command =
+        side === 'left'
+          ? 'ALARM_LEFT'
+          : 'ALARM_RIGHT';
+
+      logger.info(
+        `Setting snooze alarm for ${side} side in ${minutes} minutes with pattern ${alarmPayload.pi} (payload: ${JSON.stringify(alarmPayload)})`,
+      );
+      await executeFunction(command, hexPayload);
+    } catch (error) {
+      logger.error(
+        `Failed to snooze alarm: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      // On error, just clear the alarm
+      await executeFunction('ALARM_CLEAR', 'empty');
+    }
+  }
+
   private async processGesture(side: Side, gesture: Gesture) {
     const behavior = settingsDB.data[side].taps[gesture];
     if (behavior.type === 'temperature') {
@@ -54,9 +121,79 @@ export class FrankenMonitor {
       }
       logger.debug(`Processing gesture temperature change for ${side}. ${currentTemperatureTarget} -> ${newTemperatureTargetF}`);
       return await updateDeviceStatus({ [side]: { targetTemperatureF: newTemperatureTargetF } } as DeepPartial<DeviceStatus>);
-    } else if (behavior.type) {
-      // TODO: Add alarm handling
-      logger.warn('Skipping gesture...');
+    } else if (behavior.type === 'alarm') {
+      if (this.deviceStatus && (this.deviceStatus.left.isAlarmVibrating || this.deviceStatus.right.isAlarmVibrating)) {
+        logger.info(`[tripleTap] Snoozing active alarm on ${side} side.`);
+        await this.snoozeAlarm(side, 10);
+      }
+    } else if (behavior.type === 'base') {
+      // Cycle between relax and flat presets
+      this.currentBasePreset =
+        this.currentBasePreset === 'relax' ? 'flat' : 'relax';
+
+      const targetPreset = BASE_PRESETS[this.currentBasePreset];
+
+      logger.info(
+        `[quadTap] Cycling base to ${this.currentBasePreset} preset:`,
+        targetPreset,
+      );
+
+      try {
+        // Update memory DB to reflect movement
+        if (memoryDB.data) {
+          memoryDB.data.baseStatus = {
+            head: targetPreset.head,
+            feet: targetPreset.feet,
+            isMoving: true,
+            lastUpdate: new Date().toISOString(),
+            isConfigured: true,
+          };
+          await memoryDB.write();
+        }
+
+        // Control the base via BLE
+        if (this.currentBasePreset === 'flat') {
+          await trimixBase.goToFlat();
+        } else {
+          await trimixBase.setPosition({
+            head: targetPreset.head,
+            feet: targetPreset.feet,
+            feedRate: targetPreset.feedRate,
+          });
+        }
+
+        // Estimate movement completion time
+        const currentStatus = memoryDB.data?.baseStatus;
+        const estimatedTime = Math.max(
+          Math.abs((currentStatus?.head || 0) - targetPreset.head) * 200,
+          Math.abs((currentStatus?.feet || 0) - targetPreset.feet) * 200,
+          3000, // Minimum 3 seconds
+        );
+
+        setTimeout(async () => {
+          logger.info(
+            `[quadTap] Base ${this.currentBasePreset} preset movement completed`,
+          );
+          if (memoryDB.data?.baseStatus) {
+            memoryDB.data.baseStatus.isMoving = false;
+            await memoryDB.write();
+          }
+        }, estimatedTime);
+      } catch (error) {
+        logger.error(
+          `[quadTap] Failed to set base preset: ${error instanceof Error ? error.message : String(error)}`,
+        );
+
+        // Reset movement status on error
+        if (memoryDB.data?.baseStatus) {
+          memoryDB.data.baseStatus.isMoving = false;
+          await memoryDB.write();
+        }
+
+        // Revert preset state on error
+        this.currentBasePreset =
+          this.currentBasePreset === 'relax' ? 'flat' : 'relax';
+      }
     }
   }
 
@@ -124,4 +261,5 @@ export class FrankenMonitor {
     logger.debug('FrankenMonitor loop exited');
   }
 }
+
 

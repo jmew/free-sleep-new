@@ -16,6 +16,7 @@ import vitals from '../routes/metrics/vitals.js';
 import logs from '../routes/logs/logs.js';
 import serverStatus from '../routes/serverStatus/serverStatus.js';
 import logger from '../logger.js';
+import baseControl from '../routes/baseControl/baseControl.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +24,7 @@ const __dirname = path.dirname(__filename);
 export default function (app: Express) {
   logger.debug('Registering routes...');
   app.use('/api/', alarm);
+  app.use('/api/', baseControl);
   app.use('/api/', deviceStatus);
   app.use('/api/', execute);
   app.use('/api/', schedules);

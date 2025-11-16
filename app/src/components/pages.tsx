@@ -1,4 +1,5 @@
 import React from 'react';
+import AdjustIcon from '@mui/icons-material/Adjust';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import BedIcon from '@mui/icons-material/Bed';
 import ThermostatIcon from '@mui/icons-material/Thermostat';
@@ -23,6 +24,7 @@ function TemperatureIcon() {
 
 export const PAGES: Page[] = [
   { title: 'Temperature', route: '/temperature', icon: <TemperatureIcon/> },
+  { title: 'Elevation', route: '/base-control', icon: <AdjustIcon /> },
   { title: 'Schedules', route: '/schedules', icon: <ScheduleIcon/> },
 
   { title: 'Data', route: '/data', icon: <BarChartIcon/> },
